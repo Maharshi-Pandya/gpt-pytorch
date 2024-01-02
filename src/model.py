@@ -1,5 +1,6 @@
 # todo: implement the model
 
+import math
 import torch
 import torch.nn as nn
 import einops
@@ -44,6 +45,20 @@ class CausalSelfAttention(nn.Module):
         q, k, v = self.w_proj(x).split(self.d_embed, dim=2)
         
         # resulting shape (bs, nh, sl, ed // nh)
-        q = einops.rearrange(q, "bs sl (nh ed) -> bs nh sl ed", nh=self.n_heads)
-        k = einops.rearrange(k, "bs sl (nh ed) -> bs nh sl ed", nh=self.n_heads)
-        v = einops.rearrange(v, "bs sl (nh ed) -> bs nh sl ed", nh=self.n_heads)
+        q: torch.Tensor = einops.rearrange(q, "bs sl (nh ed) -> bs nh sl ed", nh=self.n_heads)
+        k: torch.Tensor = einops.rearrange(k, "bs sl (nh ed) -> bs nh sl ed", nh=self.n_heads)
+        v: torch.Tensor = einops.rearrange(v, "bs sl (nh ed) -> bs nh sl ed", nh=self.n_heads)
+
+        # masked self-attention: softmax(q * kt / sqrt(dk)) * v
+        kT: torch.Tensor = einops.rearrange(k, "bs nh sl ed -> bs nh ed sl")
+
+        att = (q @ kT) * (1 / math.sqrt(k.size(-1)))    # (bs, nh, sl, sl)
+        att = att.masked_fill(self.attn_mask[:, :, :sl, :sl] == 0, float("-inf"))
+        att = torch.softmax(att, dim=-1)
+        att = self.attn_drop(att)
+
+        y = att @ v     # (bs, nh, sl, sl) * (bs, nh, sl, ed) -> (bs, nh, sl, ed)
+        y = einops.rearrange(y, "bs nh sl ed -> bs sl (nh ed)")     # concat heads
+
+        output = self.resd_drop(self.o_proj(y))
+        return output
