@@ -62,3 +62,57 @@ class CausalSelfAttention(nn.Module):
 
         output = self.resd_drop(self.o_proj(y))
         return output
+
+
+class Block(nn.Module):
+    """
+    1 block of layernom1 + attention + residual + layernorm2 + ffn + residual
+    """
+
+    def __init__(self, config: ConfigGPT):
+        super().__init__()
+
+        self.ln1 = nn.LayerNorm(config.d_embed)
+        self.attn = CausalSelfAttention(config)
+        self.ln2 = nn.LayerNorm(config.d_embed)
+        self.ffn = nn.ModuleDict(dict(
+            i_proj = nn.Linear(config.d_embed, 4 * config.d_embed),
+            o_proj = nn.Linear(4 * config.d_embed, config.d_embed),
+            act = nn.GELU(),
+            drop = nn.Dropout(config.resd_pdrop)
+        ))
+
+        ffn = self.ffn
+        # forward pass of ffn
+        self.ffnf = lambda x: ffn.drop(ffn.o_proj(ffn.act(ffn.i_proj(x))))
+
+    def forward(self, x: torch.Tensor):
+        x = x + self.attn(self.ln1(x))
+        x = x + self.ffnf(self.ln2(x))
+        return x
+    
+
+class GPT2(nn.Module):
+    def __init__(self, config: ConfigGPT):
+        super().__init__()
+
+        self.context_size = config.context_size
+
+        self.ln1 = nn.LayerNorm(config.d_embed)
+        self.transformer = nn.ModuleDict(dict(
+            wte = nn.Embedding(config.vocab_size, config.d_embed),
+            wpe = nn.Embedding(self.context_size, config.d_embed),
+            drop = nn.Dropout(config.embed_pdrop),
+            attn = nn.ModuleList([Block(config) for _ in range(config.n_attn_heads)]),
+            lnf = nn.LayerNorm(config.d_embed)
+        ))
+        # one hot ?
+        self.lm_head = nn.Linear(config.d_embed, config.vocab_size, bias=False)
+
+        # todo: weight initialization
+        self.apply(self._init_weights)
+
+    def _init_weights(self, module):
+        """
+        with N(0, 0.02)
+        """

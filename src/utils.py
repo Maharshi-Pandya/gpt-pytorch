@@ -19,7 +19,7 @@ class ConfigGPT:
     def __init__(self) -> None:
         self.vocab_size = None
         self.d_embed = 768
-        self.context_size = 512
+        self.context_size = 1024
         self.n_attn_layers = 12
         self.n_attn_heads = 12
         self.resd_pdrop = 0.1
